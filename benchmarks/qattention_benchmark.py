@@ -40,19 +40,21 @@ def quantized_kv_cache_decode(
     n_layers, num_heads, head_dim, 
     batch_size, dtype, seq_len, 
     trans_dtype=torch.float16, trans="had"):
-    device = torch.device("cuda:0")
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    device = DEV
     cache = MultiLayerPagedKVCache4Bit(
-        batch_size=batch_size,
-        page_size=seq_len, 
-        max_seq_len=seq_len, 
-        device=device, 
-        n_layers=n_layers, # Ignornig n_layers as it does not affect speed
-        num_heads=num_heads,
-        head_dim=head_dim,
-        disable_quant=dtype == torch.float16,
-        trans_dtype=trans_dtype,
-        trans=trans
-    )
+            batch_size=batch_size,
+            page_size=seq_len, 
+            max_seq_len=seq_len, 
+            device=device, 
+            n_layers=n_layers, # Ignornig n_layers as it does not affect speed
+            num_heads=num_heads,
+            head_dim=head_dim,
+            disable_quant=dtype == torch.float16,
+            trans_dtype=trans_dtype,
+            trans=trans
+        )
     query_states = torch.rand((batch_size, 1, num_heads, head_dim), device=device, dtype=torch.float16)
     key_states = torch.rand((batch_size, 1, num_heads, head_dim), device=device, dtype=torch.float16)
     value_states = torch.rand((batch_size, 1, num_heads, head_dim), device=device, dtype=torch.float16)

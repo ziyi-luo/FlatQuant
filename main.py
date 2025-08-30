@@ -1,4 +1,5 @@
 import transformers
+import torch_npu
 
 import flatquant.utils as utils
 import flatquant.args_utils as args_utils

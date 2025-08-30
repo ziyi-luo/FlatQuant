@@ -66,9 +66,10 @@ class Linear4bit(torch.nn.Module):
         int_module = Linear4bit(module.in_features, module.out_features, bias=module.bias is not None, dtype=weight_matrix.dtype).to(weight_matrix.dtype)
         if weight_scales is not None:
             assert weight_scales.shape == (module.out_features, 1), 'weight_scales should have shape (out_features, 1)'
-            weight_matrix = weight_matrix.cuda()
+            device = weight_matrix.device
+            weight_matrix = weight_matrix.to(device)
             int_module.weight_scales.copy_(weight_scales.to(weight_matrix.dtype))
-            int_rounded_weight = (weight_matrix/weight_scales.cuda()).round()
+            int_rounded_weight = (weight_matrix/weight_scales.to(device)).round()
             int_module.weight.copy_(deploy.functional.pack_i4(int_rounded_weight.to(torch.int8)).cpu())
         
             if module.bias is not None:

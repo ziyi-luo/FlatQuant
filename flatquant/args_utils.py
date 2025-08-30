@@ -17,6 +17,8 @@ supported_models = [
             './modelzoo/llama-3.1-instruct/llama-3.1-instruct-8b',
             './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-7b',
             './modelzoo/qwen-2.5-instruct/qwen-2.5-instruct-32b',
+            '../Qwen2.5-0.5B-Instruct',
+            '../Qwen2.5-7B-Instruct'
             ]
 # supported_models = [
 #             'meta-llama/Llama-2-7b-hf',

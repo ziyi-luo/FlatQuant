@@ -26,7 +26,11 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
         traincast = nullcontext
     else:
         dtype = torch.float16 if isinstance(model, transformers.LlamaForCausalLM) else torch.bfloat16
-        traincast = functools.partial(torch.amp.autocast, device_type="cuda", dtype=dtype)
+        # Support both CUDA and NPU for autocast
+        if hasattr(torch, 'npu') and torch.npu.is_available():
+            traincast = functools.partial(torch.amp.autocast, device_type="npu", dtype=dtype)
+        else:
+            traincast = functools.partial(torch.amp.autocast, device_type="cuda", dtype=dtype)
 
     # move embedding layer and first layer to target device
     layers = model.model.layers
@@ -75,7 +79,11 @@ def cali_flat_quant(args, model, dataloader, dev, logger):
     if hasattr(model.model, "rotary_emb"):
         model.model.rotary_emb = model.model.rotary_emb.cpu()
     # raise ValueError("Only support for llama-2/Llama-3/qwen-2 now")
-    torch.cuda.empty_cache()
+    # Clear memory based on device type
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.empty_cache()
+    else:
+        torch.cuda.empty_cache()
 
     # same input of first layer for fp model and quant model
     fp_inps = inps   # take output of fp model as input

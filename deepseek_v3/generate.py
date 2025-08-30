@@ -51,11 +51,13 @@ def generate(
     prompt_lens = [len(t) for t in prompt_tokens]
     assert max(prompt_lens) <= model.max_seq_len, f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})"
     total_len = min(model.max_seq_len, max_new_tokens + max(prompt_lens))
-    tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device="cuda")
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device=DEV)
     for i, t in enumerate(prompt_tokens):
-        tokens[i, :len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+        tokens[i, :len(t)] = torch.tensor(t, dtype=torch.long, device=DEV)
     prev_pos = 0
-    finished = torch.tensor([False] * len(prompt_tokens), device="cuda")
+    finished = torch.tensor([False] * len(prompt_tokens), device=DEV)
     prompt_mask = tokens != -1
     for cur_pos in range(min(prompt_lens), total_len):
         logits = model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
@@ -105,14 +107,20 @@ def main(
     global print
     if rank != 0:
         print = lambda *_, **__: None
-    torch.cuda.set_device(local_rank)
+    # Set device based on availability
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.set_device(local_rank)
+    else:
+        torch.cuda.set_device(local_rank)
     torch.set_default_dtype(torch.bfloat16)
     torch.set_num_threads(8)
     torch.manual_seed(965)
     with open(config) as f:
         args = ModelArgs(**json.load(f))
     print(args)
-    with torch.device("cuda"):
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    with torch.device(str(DEV)):
         model = Transformer(args)
     tokenizer = AutoTokenizer.from_pretrained(ckpt_path)
     tokenizer.decode(generate(model, [tokenizer.encode("DeepSeek")], 2, -1, 1.)[0])

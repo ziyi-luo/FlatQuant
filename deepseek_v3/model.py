@@ -796,7 +796,9 @@ class Transformer(nn.Module):
 
 if __name__ == "__main__":
     torch.set_default_dtype(torch.bfloat16)
-    torch.set_default_device("cuda")
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    torch.set_default_device(str(DEV))
     torch.manual_seed(0)
     args = ModelArgs()
     x = torch.randint(0, args.vocab_size, (2, 128))

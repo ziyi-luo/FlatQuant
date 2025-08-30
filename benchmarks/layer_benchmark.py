@@ -87,10 +87,12 @@ def get_model_quantized(args, config_name):
     with transformers.modeling_utils.no_init_weights(): 
         model = modeling_llama.FlatQuantLlamaForCausalLM(args=args, config=config)
 
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
     return model, functools.partial(
         _build_cache, 
         disable_quant=False,
-        device=torch.device("cuda:0"),
+        device=DEV,
         num_key_value_heads=model.config.num_key_value_heads,
         hidden_size=model.config.hidden_size,
         trans=args.trans if "qk" in args.online_trans else "none"), model.config.hidden_size
@@ -105,7 +107,7 @@ def get_model_fp16(config_name):
     return model, functools.partial(
         _build_cache, 
         disable_quant=True,
-        device=torch.device("cuda:0"),
+        device=DEV,
         num_key_value_heads=model.config.num_key_value_heads,
         hidden_size=model.config.hidden_size,
     ), model.config.hidden_size
@@ -159,7 +161,9 @@ def run_e2e(layer, cache_builder, bsz, prefill_length, decode_steps, hidden_size
 
 @torch.no_grad()
 def run_all_for_model(layer, cache_builder, bsz, prefill, decode, hidden_size):
-    layer = layer.cuda()
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    layer = layer.to(DEV)
     layer.eval()
     time_prefill, _ = run_prefill(layer, cache_builder, bsz, prefill, hidden_size)
     

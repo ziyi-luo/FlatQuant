@@ -157,6 +157,7 @@ def apply_exact_had_to_linear(module, had_dim=-1, output=False):
     dev = W_.device
     init_shape = W_.shape
     W_ = W_.float().cuda()
+    # W_ = W_.float().to(dev)
     
     if had_dim == -1:
         if output:

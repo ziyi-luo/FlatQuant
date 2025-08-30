@@ -2,7 +2,7 @@ import random
 import numpy as np
 import torch
 import transformers
-
+import torch_npu
 import logging
 
 from accelerate import dispatch_model, infer_auto_device_map
@@ -11,8 +11,18 @@ from accelerate.utils import get_balanced_memory
 # These flags disable using TensorFloat-32 tensor cores (to avoid numerical issues)
 torch.backends.cuda.matmul.allow_tf32 = False
 torch.backends.cudnn.allow_tf32 = False
-DEV = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
 
+# Device detection for NPU support
+def get_device():
+    """Get the best available device (NPU > CUDA > CPU)"""
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        return torch.device('npu:0')
+    elif torch.cuda.is_available():
+        return torch.device('cuda:0')
+    else:
+        return torch.device('cpu')
+
+DEV = get_device()
 
 def skip(*args, **kwargs):
     # This is a helper function to save time during the initialization! 
@@ -24,7 +34,7 @@ def skip_initialization():
     torch.nn.init.normal_ = skip
 
 def cleanup_memory(verbose=True) -> None:
-    """Clear GPU memory by running garbage collection and emptying cache."""
+    """Clear GPU/NPU memory by running garbage collection and emptying cache."""
     import gc
     import inspect
     caller_name = ''
@@ -34,14 +44,27 @@ def cleanup_memory(verbose=True) -> None:
         pass
 
     def total_reserved_mem() -> int:
-        return sum(torch.cuda.memory_reserved(device=i) for i in range(torch.cuda.device_count()))
+        if hasattr(torch, 'npu') and torch.npu.is_available():
+            return sum(torch.npu.memory_reserved(device=i) for i in range(torch.npu.device_count()))
+        elif torch.cuda.is_available():
+            return sum(torch.cuda.memory_reserved(device=i) for i in range(torch.cuda.device_count()))
+        else:
+            return 0
 
     memory_before = total_reserved_mem()
 
-    # gc.collect and empty cache are necessary to clean up GPU memory if the model was distributed
+    # gc.collect and empty cache are necessary to clean up GPU/NPU memory if the model was distributed
     gc.collect()
 
-    if torch.cuda.is_available():
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.empty_cache()
+        memory_after = total_reserved_mem()
+        if verbose:
+            logging.info(
+                f"NPU memory{caller_name}: {memory_before / (1024 ** 3):.2f} -> {memory_after / (1024 ** 3):.2f} GB"
+                f" ({(memory_after - memory_before) / (1024 ** 3):.2f} GB)"
+            )
+    elif torch.cuda.is_available():
         torch.cuda.empty_cache()
         memory_after = total_reserved_mem()
         if verbose:
@@ -51,7 +74,7 @@ def cleanup_memory(verbose=True) -> None:
             )
 
 def distribute_model(model) -> None:
-    """Distribute the model across available GPUs. NB: only implemented for Llama-2/3/Qwen-2."""
+    """Distribute the model across available GPUs/NPUs. NB: only implemented for Llama-2/3/Qwen-2."""
     no_split_module_classes = ['LlamaDecoderLayer', 'Qwen2DecoderLayer']
     max_memory = get_balanced_memory(model, no_split_module_classes=no_split_module_classes)
 
@@ -66,8 +89,15 @@ def seed_everything(seed=0) -> None:
     random.seed(seed)
     np.random.seed(seed)
     torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    
+    # Set device-specific seeds
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.manual_seed(seed)
+        torch.npu.manual_seed_all(seed)
+    elif torch.cuda.is_available():
+        torch.cuda.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+    
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = True
     transformers.set_seed(seed)

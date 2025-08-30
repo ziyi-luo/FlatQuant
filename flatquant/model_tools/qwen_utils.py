@@ -30,8 +30,9 @@ class FlatQuantQwen2MLP(torch.nn.Module):
         self._ori_mode = False
         self.diag_init = args.diag_init
         if self.diag_init == "sq_style":
-            self.up_smax = torch.ones_like(self.up_proj.linear.weight.abs().max(dim=0)[0]).cuda() * 1e-5
-            self.down_smax = torch.ones_like(self.down_proj.linear.weight.abs().max(dim=0)[0]).cuda() * 1e-5
+            device = self.up_proj.linear.weight.device
+            self.up_smax = torch.ones_like(self.up_proj.linear.weight.abs().max(dim=0)[0]).to(device) * 1e-5
+            self.down_smax = torch.ones_like(self.down_proj.linear.weight.abs().max(dim=0)[0]).to(device) * 1e-5
         
     def add_fq_trans(self):
         if self.args.direct_inv:
@@ -65,10 +66,10 @@ class FlatQuantQwen2MLP(torch.nn.Module):
     def _ori_forward(self, x):
         '''origin implement: down_proj = self.down_proj(self.act_fn(self.gate_proj(x)) * self.up_proj(x))'''
         if self.diag_init == "sq_style":
-            self.up_smax = torch.maximum(self.up_smax, x.reshape(-1, x.shape[-1]).abs().max(0)[0].clone().detach())
+            self.up_smax = torch.maximum(self.up_smax.to(x.device), x.reshape(-1, x.shape[-1]).abs().max(0)[0].clone().detach()).to(x.device)
         x = self.act_fn(self.gate_proj._ori_forward(x)) * self.up_proj._ori_forward(x)
         if self.diag_init == "sq_style":
-            self.down_smax = torch.maximum(self.down_smax, x.reshape(-1, x.shape[-1]).abs().max(0)[0].clone().detach())
+            self.down_smax = torch.maximum(self.down_smax.to(x.device), x.reshape(-1, x.shape[-1]).abs().max(0)[0].clone().detach()).to(x.device)
         down_states = self.down_proj._ori_forward(x)
         return down_states
 
@@ -136,7 +137,7 @@ class FlatQuantQwen2Attention(Qwen2Attention):
         self._eval_mode = False
         self.diag_init = args.diag_init
         if self.diag_init == "sq_style":
-            self.ln_smax = torch.ones_like(self.q_proj.linear.weight.abs().max(dim=0)[0]).cuda() * 1e-5
+            self.ln_smax = torch.ones_like(self.q_proj.linear.weight.abs().max(dim=0)[0]).to(self.q_proj.linear.weight.device) * 1e-5
 
     def add_fq_trans(self):
         if self.args.direct_inv:
@@ -173,8 +174,8 @@ class FlatQuantQwen2Attention(Qwen2Attention):
 
     def _ori_forward_after_ln(self, hidden_states):
         if self.diag_init == "sq_style" and hasattr(self, "ln_smax"):
-            self.ln_smax = torch.maximum(self.ln_smax, \
-                hidden_states.reshape(-1, hidden_states.shape[-1]).abs().max(0)[0].clone().detach())
+            self.ln_smax = torch.maximum(self.ln_smax.to(hidden_states.device), \
+                hidden_states.reshape(-1, hidden_states.shape[-1]).abs().max(0)[0].clone().detach()).to(hidden_states.device)
         query_states = self.q_proj._ori_forward(hidden_states)
         key_states = self.k_proj._ori_forward(hidden_states)
         value_states = self.v_proj._ori_forward(hidden_states)

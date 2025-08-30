@@ -24,17 +24,25 @@ num_bench_steps = 100
 
 @torch.inference_mode()
 def module_benchmark(module, x):
-    x = x.cuda()
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    x = x.to(DEV)
     
     # warmup
     for i in range(num_warmup_steps):
         out = module(x)
-    torch.cuda.synchronize()
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.synchronize()
+    else:
+        torch.cuda.synchronize()
     
     start_time = time.perf_counter()
     for i in range(num_bench_steps):
         out = module(x)
-    torch.cuda.synchronize()
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.synchronize()
+    else:
+        torch.cuda.synchronize()
     
     end_time = time.perf_counter()
     
@@ -48,30 +56,32 @@ def linear4bit_benchmark(args):
     
     for (feature_dim_in, feature_dim_out) in mlp_sizes:
         for dtype in benchmark_dtypes:
+            # Use device from utils for NPU support
+            from flatquant.utils import DEV
             x = torch.rand((bsz,
                             seq_len,
-                            feature_dim_in)).cuda().to(dtype)
+                            feature_dim_in)).to(DEV).to(dtype)
             baseline_mod = torch.nn.Linear(feature_dim_in,
                                            feature_dim_out,
-                                           bias=False).cuda().to(dtype)
+                                           bias=False).to(DEV).to(dtype)
             baseline_mod.weight.data = torch.randint_like(baseline_mod.weight.data,
                                                           low=-8, high=7).to(dtype)
             
-            s_w = torch.ones((feature_dim_out, 1), dtype=torch.float16, device='cuda')
+            s_w = torch.ones((feature_dim_out, 1), dtype=torch.float16, device=DEV)
             int4_mod = torch.nn.Sequential(
                 Quantizer(input_clip_ratio=1.0),
                 Linear4bit.from_float(baseline_mod, weight_scales=s_w)
-            ).cuda()
+            ).to(DEV)
             int4_mod_had = torch.nn.Sequential(
                 OnlineTrans(baseline_mod.in_features, trans="had"),
                 Quantizer(input_clip_ratio=1.0),
                 Linear4bit.from_float(baseline_mod, weight_scales=s_w),
-            ).cuda()
+            ).to(DEV)
             int4_mod_inv = torch.nn.Sequential(
                 OnlineTrans(baseline_mod.in_features, trans="matmul"),
                 Quantizer(input_clip_ratio=1.0),
                 Linear4bit.from_float(baseline_mod, weight_scales=s_w),
-            ).cuda()
+            ).to(DEV)
 
             pprint.pprint(vars(args))
             print(f"{dtype}. Sizes: {baseline_mod.weight.shape}")

@@ -55,11 +55,13 @@ def generate(
     prompt_lens = [len(t) for t in prompt_tokens]
     assert max(prompt_lens) <= model.max_seq_len, f"Prompt length exceeds model maximum sequence length (max_seq_len={model.max_seq_len})"
     total_len = min(model.max_seq_len, max_new_tokens + max(prompt_lens))
-    tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device="cuda")
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    tokens = torch.full((len(prompt_tokens), total_len), -1, dtype=torch.long, device=DEV)
     for i, t in enumerate(prompt_tokens):
-        tokens[i, :len(t)] = torch.tensor(t, dtype=torch.long, device="cuda")
+        tokens[i, :len(t)] = torch.tensor(t, dtype=torch.long, device=DEV)
     prev_pos = 0
-    finished = torch.tensor([False] * len(prompt_tokens), device="cuda")
+    finished = torch.tensor([False] * len(prompt_tokens), device=DEV)
     prompt_mask = tokens != -1
     for cur_pos in range(min(prompt_lens), total_len):
         logits = model.forward(tokens[:, prev_pos:cur_pos], prev_pos)
@@ -239,7 +241,11 @@ def cali_flat_quant(args, model_args, model, dataloader, dev, rank, logger):
         traincast = nullcontext
     else:
         dtype = torch.bfloat16
-        traincast = torch.cuda.amp.autocast
+        # Support both CUDA and NPU for autocast
+        if hasattr(torch, 'npu') and torch.npu.is_available():
+            traincast = torch.amp.autocast(device_type="npu", dtype=dtype)
+        else:
+            traincast = torch.cuda.amp.autocast
 
     # move embedding layer and first layer to target device
     layers = model.layers
@@ -280,7 +286,11 @@ def cali_flat_quant(args, model_args, model, dataloader, dev, rank, logger):
     layers[0] = layers[0].module
     layers[0] = layers[0].cpu()
     model.embed = model.embed.cpu()
-    torch.cuda.empty_cache()
+    # Clear memory based on device type
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.empty_cache()
+    else:
+        torch.cuda.empty_cache()
     
     # same input of first layer for fp model and quant model
     fp_inps = inps   # take output of fp model as input
@@ -370,11 +380,19 @@ def cali_flat_quant(args, model_args, model, dataloader, dev, rank, logger):
             if name in dtype_dict.keys():
                 param.data = param.to(dtype_dict[name])
         del layer
-        torch.cuda.empty_cache()
+        # Clear memory based on device type
+        if hasattr(torch, 'npu') and torch.npu.is_available():
+            torch.npu.empty_cache()
+        else:
+            torch.cuda.empty_cache()
 
     del inps, fp_inps, fp_outs
     gc.collect()
-    torch.cuda.empty_cache()
+    # Clear memory based on device type
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.empty_cache()
+    else:
+        torch.cuda.empty_cache()
     return model
 
 
@@ -391,7 +409,11 @@ def main(
     global print
     if rank != 0:
         print = lambda *_, **__: None
-    torch.cuda.set_device(local_rank)
+    # Set device based on availability
+    if hasattr(torch, 'npu') and torch.npu.is_available():
+        torch.npu.set_device(local_rank)
+    else:
+        torch.cuda.set_device(local_rank)
     torch.set_default_dtype(torch.bfloat16)
     torch.set_num_threads(8)
     torch.manual_seed(965)
@@ -409,7 +431,9 @@ def main(
     logger.info("---- finished create tokenizer")
 
     if args.resume or args.reload_matrix:
-        with torch.device("cuda"):
+        # Use device from utils for NPU support
+        from flatquant.utils import DEV
+        with torch.device(str(DEV)):
             model = Transformer(model_args)
         logger.info("---created model")
         
@@ -424,7 +448,9 @@ def main(
         ppl_fp = ppl_eval(model)
         logger.info(f"ppl_fp: {ppl_fp}")
 
-        with torch.device("cuda"):
+        # Use device from utils for NPU support
+        from flatquant.utils import DEV
+        with torch.device(str(DEV)):
             apply_flatquant_to_v3(args, model)
         logger.info("---- finished apply_flatquant_to_v3/r1")
         if not args.reload_matrix:
@@ -462,11 +488,13 @@ def main(
         logger.info("---- finished apply_flatquant_to_v3")
         print(model)
 
-        cali_flat_quant(args, model_args, model, dataloader, 'cuda', rank, logger)
+        # Use device from utils for NPU support
+        from flatquant.utils import DEV
+        cali_flat_quant(args, model_args, model, dataloader, str(DEV), rank, logger)
 
         if args.save_matrix:
             save_flat_matrices(args, model, rank)
-        model = model.cuda()
+        model = model.to(DEV)
         # reparameterize_model(model)
         # test_input = "蝙蝠侠是谁？"
         # test_quant_output = tokenizer.decode(generate(model, [tokenizer.encode(test_input)], 20, -1, -1)[0])

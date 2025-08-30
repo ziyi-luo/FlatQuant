@@ -4,6 +4,7 @@
 *.log
 *.pyc
 *.so
+datasets/*
 build/*
 deploy.egg-info/*
 *.cmake
@@ -12,3 +13,5 @@ CMakeFiles/*
 CMakeCache.txt
 *.egg
 Makefile
+*.txt
+*.pth

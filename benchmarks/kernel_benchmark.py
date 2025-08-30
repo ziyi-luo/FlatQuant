@@ -233,9 +233,11 @@ def matmul(a, b, c, seq_len):
 
 def benchmark(B, M, N, S, provider):
     # B = Batch * SeqLen
-    a = torch.randn((M, M), device='cuda', dtype=torch.float16)
-    b = torch.randn((B, M, N), device='cuda', dtype=torch.float16)
-    c = torch.randn((N, N), device='cuda', dtype=torch.float16)
+    # Use device from utils for NPU support
+    from flatquant.utils import DEV
+    a = torch.randn((M, M), device=DEV, dtype=torch.float16)
+    b = torch.randn((B, M, N), device=DEV, dtype=torch.float16)
+    c = torch.randn((N, N), device=DEV, dtype=torch.float16)
     quantiles = [0.5, 0.2, 0.8]
     if provider == 'cublas':
         quantizer = Quantizer()
